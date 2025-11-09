@@ -1,3 +1,10 @@
+import os
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_postgres import PGVector
+from langchain_core.documents import Document
+from dotenv import load_dotenv
+load_dotenv()
+
 PROMPT_TEMPLATE = """
 CONTEXTO:
 {contexto}
@@ -25,5 +32,33 @@ PERGUNTA DO USUÁRIO:
 RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
+def get_store():
+      embeddings = OpenAIEmbeddings(model=os.getenv("OPENAI_MODEL","text-embedding-3-small"))
+      store = PGVector(
+        embeddings=embeddings,
+        collection_name=os.getenv("PG_VECTOR_COLLECTION_NAME"),
+        connection=os.getenv("DATABASE_URL"),
+        use_jsonb=True,
+      )
+      return store
+
 def search_prompt(question=None):
-    pass
+    try:
+        store = get_store()
+        llm = ChatOpenAI(model="gpt-5-nano", openai_api_key=os.getenv("OPENAI_API_KEY"))
+    except Exception as e:
+        print(f"Erro ao inicializar LLM ou store: {e}")
+        return None
+
+    def ask(query):
+        results = store.similarity_search_with_score(query, k=10)
+        if not results:
+            context = ""
+        else:
+            context = "\n\n".join([doc.page_content for doc, _ in results])
+
+        prompt = PROMPT_TEMPLATE.format(contexto=context, pergunta=query)
+        response = llm.invoke(prompt)
+        return response.content.strip()
+
+    return ask
